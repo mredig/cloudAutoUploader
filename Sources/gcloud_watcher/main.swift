@@ -5,12 +5,6 @@ var workingFiles = Set<URL>()
 
 func main() {
 	let args = getArgs()
-//	let allFiles = scrapeDirectory(at: args.directory)
-//	for file in allFiles {
-//		print(file)
-//		let size = getSize(ofFile: file)
-//		print(size)
-//	}
 
 	while true {
 		updateDirectory(args.directory)
@@ -27,7 +21,8 @@ func updateDirectory(_ directory: URL) {
 		if let oldSize = watchedFiles[file] {
 			if oldSize == currentSize && !workingFiles.contains(file) {
 				workingFiles.insert(file)
-				print("time to do something to \(file)")
+				print("uploading \(file)")
+				rcloneFile(file)
 			}
 		} else {
 			print("new file: \(file)")
@@ -79,6 +74,19 @@ func getSize(ofFile file: URL) -> Int {
 	let statResult = stat(file.path, &st)
 	guard statResult != -1 else { return 0 }
 	return Int(st.st_size)
+}
+
+func rcloneFile(_ file: URL) {
+	let command = "rclone moveto GCloudAutoBackup:backups-mredig-nearline/autobackup/"
+	var commandArgs = command.split(separator: " ").map { String($0) }
+	commandArgs.insert(file.path, at: 2)
+	commandArgs[commandArgs.count - 1] += file.lastPathComponent
+//	print(commandArgs)
+
+	DispatchQueue.global().async {
+		let info = SystemUtility.shell(commandArgs)
+		print(info)
+	}
 }
 
 
