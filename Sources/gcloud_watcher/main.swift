@@ -122,13 +122,11 @@ func getSize(ofDirectory directory: URL) -> Int {
 }
 
 func rcloneFile(_ file: URL) {
-	let command = "rclone move GCloudAutoBackup:backups-mredig-nearline/autobackup/"
-
+//	let command = "rclone -u moveto GCloudAutoBackup:backups-mredig-nearline/autobackup/"
+	let command = "rclone -u --bwlimit 0.25M moveto GCloudAutoBackup:backups-mredig-nearline/autobackup/"
 	var commandArgs = command.split(separator: " ").map { String($0) }
-	commandArgs.insert(file.path, at: 2)
+	commandArgs.insert(file.path, at: commandArgs.count - 1)
 	commandArgs[commandArgs.count - 1] += file.lastPathComponent
-	commandArgs.insert("--delete-empty-src-dirs", at: 3)
-	commandArgs.insert("--create-empty-src-dirs", at: 3)
 //	print(commandArgs)
 
 	DispatchQueue.global().async {
