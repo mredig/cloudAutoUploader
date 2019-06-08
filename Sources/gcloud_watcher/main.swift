@@ -1,5 +1,6 @@
 import Foundation
 
+let fm = FileManager.default
 var watchedFiles = [URL: Int]()
 var workingFiles = Set<URL>()
 
@@ -13,24 +14,41 @@ func main() {
 }
 
 func updateDirectory(_ directory: URL) {
-	let currentFiles = scrapeDirectory(at: directory)
+	let currentFiles = scrapeDirectory(at: directory, skipHiddenFiles: false)
 	//check filesizes
-	for file in currentFiles {
-		let currentSize = getSize(ofFile: file)
-		// compare values
-		if let oldSize = watchedFiles[file] {
-			if oldSize == currentSize && !workingFiles.contains(file) {
-				workingFiles.insert(file)
-				print("uploading \(file)")
-				rcloneFile(file)
+	for item in currentFiles {
+		// check that it's not a stupid resource fork file
+		guard !item.lastPathComponent.hasPrefix("._") else {
+			continue
+		}
+		// check if directory or not as that makes a difference in handling
+		var isDir: ObjCBool = false
+		_ = fm.fileExists(atPath: item.path, isDirectory: &isDir)
+
+		// get size
+		let currentSize: Int
+		if isDir.boolValue == true {
+			currentSize = getSize(ofDirectory: item)
+		} else {
+			currentSize = getSize(ofFile: item)
+		}
+
+		// if size is stored and is the same as it was previously, that means that it's not changed since the last check - safe bet that it's done copying to the staging area, so it should be safe to start the upload
+		if let oldSize = watchedFiles[item] {
+			if oldSize == currentSize && !workingFiles.contains(item), oldSize != 0 {
+				workingFiles.insert(item)
+				print("uploading \(item)")
+				rcloneFile(item)
+			} else if isDir.boolValue == true, currentSize == 0, oldSize == 0 {
+				delete(itemAt: item)
 			}
 		} else {
-			print("new file: \(file)")
+			print("new file: \(item)")
 		}
-		watchedFiles[file] = currentSize
+		watchedFiles[item] = currentSize
 	}
 
-	//remove files no longer listed
+	//remove files that have been uploaded
 	for (watchedFile, _) in watchedFiles {
 		if !currentFiles.contains(watchedFile) {
 			print("file removed: \(watchedFile)")
@@ -40,11 +58,28 @@ func updateDirectory(_ directory: URL) {
 	}
 }
 
-func scrapeDirectory(at directory: URL) -> Set<URL> {
-	let fm = FileManager.default
-
+func delete(itemAt path: URL) {
 	do {
-		let contents = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [], options: .skipsHiddenFiles)
+		try fm.removeItem(at: path)
+		let lastComponent = path.lastPathComponent
+		let metaFile = path.deletingLastPathComponent().appendingPathComponent("._" + lastComponent)
+		if fm.fileExists(atPath: metaFile.path) {
+			try fm.removeItem(at: metaFile)
+		}
+	} catch {
+		print("Error removing item: \(error)")
+	}
+}
+
+func scrapeDirectory(at directory: URL, skipHiddenFiles: Bool = true) -> Set<URL> {
+	let skipHidden: FileManager.DirectoryEnumerationOptions
+	if skipHiddenFiles {
+		skipHidden = .skipsHiddenFiles
+	} else {
+		skipHidden = []
+	}
+	do {
+		let contents = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [], options: skipHidden)
 		return Set(contents)
 	} catch {
 		fatalError("There was an error scraping the directory \(directory): \(error)")
@@ -76,11 +111,24 @@ func getSize(ofFile file: URL) -> Int {
 	return Int(st.st_size)
 }
 
+func getSize(ofDirectory directory: URL) -> Int {
+	guard scrapeDirectory(at: directory).count != 0 else { return 0 }
+	let result = SystemUtility.shellArrayOut(["du", "-b", directory.path])
+	guard result.returnCode == 0,
+		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting directory size") }
+	let sizeStr = sizeStrExtra.replacingOccurrences(of: ##"\D.*"##, with: "", options: .regularExpression, range: nil)
+	guard let dirSize = Int(sizeStr) else { fatalError("Error converting string size to int") }
+	return dirSize
+}
+
 func rcloneFile(_ file: URL) {
-	let command = "rclone moveto GCloudAutoBackup:backups-mredig-nearline/autobackup/"
+	let command = "rclone move GCloudAutoBackup:backups-mredig-nearline/autobackup/"
+
 	var commandArgs = command.split(separator: " ").map { String($0) }
 	commandArgs.insert(file.path, at: 2)
 	commandArgs[commandArgs.count - 1] += file.lastPathComponent
+	commandArgs.insert("--delete-empty-src-dirs", at: 3)
+	commandArgs.insert("--create-empty-src-dirs", at: 3)
 //	print(commandArgs)
 
 	DispatchQueue.global().async {
