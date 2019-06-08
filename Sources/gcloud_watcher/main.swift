@@ -1,34 +1,56 @@
 import Foundation
 
 var watchedFiles = [URL: Int]()
+var workingFiles = Set<URL>()
 
 func main() {
 	let args = getArgs()
-	let allFiles = scrapeDirectory(at: args.directory)
-	for file in allFiles {
-		print(file)
-		let size = getSize(ofFile: file)
-		print(size)
-//		do {
-////			let resourceThings = try file.resourceValues(forKeys: Set([.fileSizeKey, .fileAllocatedSizeKey, .totalFileSizeKey, .totalFileAllocatedSizeKey]))
-//			let attr = try FileManager.default.attributesOfItem(atPath: file.absoluteString)
-//			let fileSize = attr[FileAttributeKey.size]
-//			print(fileSize)
-//		} catch {
-//			NSLog("Couldn't retrieve size info: \(error)")
-//		}
-	}
-//	print(allFiles)
+//	let allFiles = scrapeDirectory(at: args.directory)
+//	for file in allFiles {
+//		print(file)
+//		let size = getSize(ofFile: file)
+//		print(size)
+//	}
 
+	while true {
+		updateDirectory(args.directory)
+		sleep(1)
+	}
 }
 
-func scrapeDirectory(at directory: URL) -> [URL] {
+func updateDirectory(_ directory: URL) {
+	let currentFiles = scrapeDirectory(at: directory)
+	//check filesizes
+	for file in currentFiles {
+		let currentSize = getSize(ofFile: file)
+		// compare values
+		if let oldSize = watchedFiles[file] {
+			if oldSize == currentSize && !workingFiles.contains(file) {
+				workingFiles.insert(file)
+				print("time to do something to \(file)")
+			}
+		} else {
+			print("new file: \(file)")
+		}
+		watchedFiles[file] = currentSize
+	}
+
+	//remove files no longer listed
+	for (watchedFile, _) in watchedFiles {
+		if !currentFiles.contains(watchedFile) {
+			print("file removed: \(watchedFile)")
+			watchedFiles.removeValue(forKey: watchedFile)
+			workingFiles.remove(watchedFile)
+		}
+	}
+}
+
+func scrapeDirectory(at directory: URL) -> Set<URL> {
 	let fm = FileManager.default
 
-	print("scraping \(directory)")
 	do {
 		let contents = try fm.contentsOfDirectory(at: directory, includingPropertiesForKeys: [], options: .skipsHiddenFiles)
-		return contents
+		return Set(contents)
 	} catch {
 		fatalError("There was an error scraping the directory \(directory): \(error)")
 	}
@@ -54,8 +76,8 @@ func getArgs() -> (directory: URL, nothing: String) {
 
 func getSize(ofFile file: URL) -> Int {
 	var st = stat()
-	let statRes = stat(file.path, &st)
-	guard statRes != -1 else { return 0 }
+	let statResult = stat(file.path, &st)
+	guard statResult != -1 else { return 0 }
 	return Int(st.st_size)
 }
 
