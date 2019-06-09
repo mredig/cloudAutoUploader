@@ -6,21 +6,25 @@ var workingFiles = Set<URL>()
 
 func main() {
 	let args = getArgs()
+	var ignores = Set<URL>()
 
 	let readme = createReadme(in: args.directory)
+	let excludes = createExcludes(in: args.directory)
+	ignores.insert(readme)
+	ignores.insert(excludes)
 
 	while true {
-		updateDirectory(args.directory, ignoringReadme: readme)
+		updateDirectory(args.directory, ignores: ignores, excludesFile: excludes)
 		sleep(60)
 	}
 }
 
-func updateDirectory(_ directory: URL, ignoringReadme readme: URL) {
+func updateDirectory(_ directory: URL, ignores: Set<URL>, excludesFile: URL) {
 	let currentFiles = scrapeDirectory(at: directory, skipHiddenFiles: false)
 	//check filesizes
 	for item in currentFiles {
 		// check that it's not a stupid resource fork file
-		guard !item.lastPathComponent.hasPrefix("._") && item != readme else {
+		guard !item.lastPathComponent.hasPrefix("._") && !ignores.contains(item) else {
 			continue
 		}
 		// check if directory or not as that makes a difference in handling
@@ -45,7 +49,7 @@ func updateDirectory(_ directory: URL, ignoringReadme readme: URL) {
 			if oldSize == currentSize && !workingFiles.contains(item), oldSize != 0 {
 				workingFiles.insert(item)
 				print("uploading \(item)")
-				rcloneFile(item)
+				rcloneFile(item, excludes: excludesFile)
 			}
 		} else {
 			print("new file: \(item)")
@@ -78,6 +82,20 @@ Another workaround is to simply zip up a directory before uploading. This, of co
 		try readmeInfo.write(to: infoPath, atomically: true, encoding: .utf8)
 	} catch {
 		print("Error saving readme: \(error)")
+	}
+	return infoPath
+}
+
+func createExcludes(in directory: URL) -> URL {
+	let excludes = """
+._*
+"""
+	let infoPath = directory.appendingPathComponent("excludeTheseFilesAndPatterns.txt")
+	guard !fm.fileExists(atPath: infoPath.path) else { return infoPath }
+	do {
+		try excludes.write(to: infoPath, atomically: true, encoding: .utf8)
+	} catch {
+		print("Error saving excludes: \(error)")
 	}
 	return infoPath
 }
@@ -135,7 +153,13 @@ func isDirectory(item: URL) -> Bool {
 }
 
 func getSize(ofFile file: URL) -> UInt64 {
+	#if os(macOS)
+	let result = SystemUtility.shellArrayOut(["du", file.path])
+	let result2 = SystemUtility.shell(["du", file.path])
+	#elseif os(Linux)
 	let result = SystemUtility.shellArrayOut(["du", "-b", file.path])
+	let result2 = SystemUtility.shell(["du", "-b", file.path])
+	#endif
 	guard result.returnCode == 0,
 		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting file size: \(result.stdOut)") }
 	let sizeStr = sizeStrExtra.replacingOccurrences(of: ##"\D.*"##, with: "", options: .regularExpression, range: nil)
@@ -160,19 +184,19 @@ func getSize(ofDirectory directory: URL) -> UInt64 {
 	return dirSize
 }
 
-func rcloneFile(_ file: URL) {
+func rcloneFile(_ file: URL, excludes: URL) {
 //	let command = "rclone -u moveto GCloudAutoBackup:backups-mredig-nearline/autobackup/"
 	let sourcePathSymbol = "sourcePathSymbol---1-1-1-1-111--1"
-	let command = "rclone -u --bwlimit 0.25M moveto \(sourcePathSymbol) GCloudAutoBackup:backups-mredig-nearline/autobackup/"
+	let command = "rclone -u --bwlimit 0.25M moveto --exclude-from \(excludes.path) \(sourcePathSymbol) GCloudAutoBackup:backups-mredig-nearline/autobackup/"
 	var commandArgs = command.split(separator: " ").map { String($0) }
 	commandArgs = commandArgs.map { $0 == sourcePathSymbol ? file.path : $0 }
 	commandArgs[commandArgs.count - 1] += file.lastPathComponent
 //	print(commandArgs)
 
-	DispatchQueue.global().async {
+//	DispatchQueue.global().async {
 		let info = SystemUtility.shell(commandArgs)
 		print(info)
-	}
+//	}
 }
 
 
