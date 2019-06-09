@@ -7,28 +7,35 @@ var workingFiles = Set<URL>()
 func main() {
 	let args = getArgs()
 
+	let readme = createReadme(in: args.directory)
+
 	while true {
-		updateDirectory(args.directory)
+		updateDirectory(args.directory, ignoringReadme: readme)
 		sleep(1)
 	}
 }
 
-func updateDirectory(_ directory: URL) {
+func updateDirectory(_ directory: URL, ignoringReadme readme: URL) {
 	let currentFiles = scrapeDirectory(at: directory, skipHiddenFiles: false)
 	//check filesizes
 	for item in currentFiles {
 		// check that it's not a stupid resource fork file
-		guard !item.lastPathComponent.hasPrefix("._") else {
+		guard !item.lastPathComponent.hasPrefix("._") && item != readme else {
 			continue
 		}
 		// check if directory or not as that makes a difference in handling
-		var isDir: ObjCBool = false
-		_ = fm.fileExists(atPath: item.path, isDirectory: &isDir)
+		let isDir = isDirectory(item: item)
 
 		// get size
 		let currentSize: Int
-		if isDir.boolValue == true {
+		if isDir {
 			currentSize = getSize(ofDirectory: item)
+			guard currentSize != 0 else {
+				if watchedFiles[item] != nil {
+					delete(itemAt: item)
+				}
+				continue
+			}
 		} else {
 			currentSize = getSize(ofFile: item)
 		}
@@ -39,8 +46,6 @@ func updateDirectory(_ directory: URL) {
 				workingFiles.insert(item)
 				print("uploading \(item)")
 				rcloneFile(item)
-			} else if isDir.boolValue == true, currentSize == 0, oldSize == 0 {
-				delete(itemAt: item)
 			}
 		} else {
 			print("new file: \(item)")
@@ -56,6 +61,25 @@ func updateDirectory(_ directory: URL) {
 			workingFiles.remove(watchedFile)
 		}
 	}
+}
+
+func createReadme(in directory: URL) -> URL {
+	let readmeInfo = """
+Place files in this folder to upload them to the google cloud autobackup folder.
+
+There is a bug when adding directories that causes smb to fail. I believe that it's got something to do with locking files that in progress copying (both doing `du -b [directory]` and running `stat` on all files for a cumulative calculation during a directory copy operation in code seem to cause it to fail - it MIGHT work with another networking transfer... but not tested)
+
+A slight workaround for this is to create an empty directory (new empty directories won't be uploaded), and then add *FILES* to it *ALL AT ONCE* - once a subsequent scrape occurs, new items will not able to be added (unless they are *already* in progress). This means to shift/comand select multiple files in Finder and move/copy them in *ONE* move.
+
+Another workaround is to simply zip up a directory before uploading. This, of course, will only be acceptable in some scenarios.
+"""
+	let infoPath = directory.appendingPathComponent("readme.info.md")
+	do {
+		try readmeInfo.write(to: infoPath, atomically: true, encoding: .utf8)
+	} catch {
+		print("Error saving readme: \(error)")
+	}
+	return infoPath
 }
 
 func delete(itemAt path: URL) {
@@ -104,6 +128,12 @@ func getArgs() -> (directory: URL, nothing: String) {
 	return (directory, "")
 }
 
+func isDirectory(item: URL) -> Bool {
+	var isDir: ObjCBool = false
+	_ = fm.fileExists(atPath: item.path, isDirectory: &isDir)
+	return isDir.boolValue
+}
+
 func getSize(ofFile file: URL) -> Int {
 	var st = stat()
 	let statResult = stat(file.path, &st)
@@ -112,13 +142,32 @@ func getSize(ofFile file: URL) -> Int {
 }
 
 func getSize(ofDirectory directory: URL) -> Int {
-	guard scrapeDirectory(at: directory).count != 0 else { return 0 }
-	let result = SystemUtility.shellArrayOut(["du", "-b", directory.path])
-	guard result.returnCode == 0,
-		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting directory size") }
-	let sizeStr = sizeStrExtra.replacingOccurrences(of: ##"\D.*"##, with: "", options: .regularExpression, range: nil)
-	guard let dirSize = Int(sizeStr) else { fatalError("Error converting string size to int") }
-	return dirSize
+//	guard scrapeDirectory(at: directory).count != 0 else { return 0 }
+//	let result = SystemUtility.shellArrayOut(["du", "-b", directory.path])
+//	guard result.returnCode == 0,
+//		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting directory size") }
+//	let sizeStr = sizeStrExtra.replacingOccurrences(of: ##"\D.*"##, with: "", options: .regularExpression, range: nil)
+//	guard let dirSize = Int(sizeStr) else { fatalError("Error converting string size to int") }
+//	return dirSize
+
+	let errorHandler = { (url: URL, error: Error) -> Bool in
+		print("error scraping url \(url): \(error)")
+		return true
+	}
+	guard let enumerator = fm.enumerator(at: directory, includingPropertiesForKeys: nil, options: [], errorHandler: errorHandler) else { return 0 }
+	var outSize = 0
+	for plainItem in enumerator.allObjects {
+		guard let item = plainItem as? URL else {
+			print("not url: \(plainItem)")
+			continue
+		}
+		guard !isDirectory(item: item) else {
+			print("skipping directory: \(item)")
+			continue
+		}
+		outSize += getSize(ofFile: item)
+	}
+	return outSize
 }
 
 func rcloneFile(_ file: URL) {
