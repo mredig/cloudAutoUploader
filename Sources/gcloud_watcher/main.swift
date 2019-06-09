@@ -89,6 +89,7 @@ Another workaround is to simply zip up a directory before uploading. This, of co
 func createExcludes(in directory: URL) -> URL {
 	let excludes = """
 ._*
+.DS_Store
 """
 	let infoPath = directory.appendingPathComponent("excludeTheseFilesAndPatterns.txt")
 	guard !fm.fileExists(atPath: infoPath.path) else { return infoPath }
@@ -130,7 +131,9 @@ func scrapeDirectory(at directory: URL, skipHiddenFiles: Bool = true) -> Set<URL
 
 func getArgs() -> (directory: URL, nothing: String) {
 	guard CommandLine.argc > 1 else {
-		fatalError(outputInstructions(false))
+//		fatalError(outputInstructions(false))
+		outputInstructions()
+		exit(1)
 	}
 
 	var directoryString = ""
@@ -155,10 +158,8 @@ func isDirectory(item: URL) -> Bool {
 func getSize(ofFile file: URL) -> UInt64 {
 	#if os(macOS)
 	let result = SystemUtility.shellArrayOut(["du", file.path])
-	let result2 = SystemUtility.shell(["du", file.path])
 	#elseif os(Linux)
 	let result = SystemUtility.shellArrayOut(["du", "-b", file.path])
-	let result2 = SystemUtility.shell(["du", "-b", file.path])
 	#endif
 	guard result.returnCode == 0,
 		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting file size: \(result.stdOut)") }
@@ -172,13 +173,11 @@ func getSize(ofDirectory directory: URL) -> UInt64 {
 	guard scrapeDirectory(at: directory).count != 0 else { return 0 }
 	#if os(macOS)
 	let result = SystemUtility.shellArrayOut(["du", directory.path])
-	let result2 = SystemUtility.shell(["du", directory.path])
 	#elseif os(Linux)
 	let result = SystemUtility.shellArrayOut(["du", "-b", directory.path])
-	let result2 = SystemUtility.shell(["du", "-b", directory.path])
 	#endif
 	guard result.returnCode == 0,
-		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting directory size: \(result.stdOut) (\(result) AND \(result2)") }
+		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting directory size: \(result.stdOut)") }
 	let sizeStr = sizeStrExtra.replacingOccurrences(of: ##"\D.*"##, with: "", options: .regularExpression, range: nil)
 	guard let dirSize = UInt64(sizeStr) else { fatalError("Error converting string size to int") }
 	return dirSize
@@ -202,7 +201,7 @@ func rcloneFile(_ file: URL, excludes: URL) {
 
 @discardableResult func outputInstructions(_ printOut: Bool = true) -> String {
 	let instructions = """
-Usage: watcher [pathToWatchDirectory]
+Usage: cloud_watcher [pathToWatchDirectory]
 """
 	if printOut {
 		print(instructions)
