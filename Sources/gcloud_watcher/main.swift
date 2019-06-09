@@ -1,7 +1,7 @@
 import Foundation
 
 let fm = FileManager.default
-var watchedFiles = [URL: Int]()
+var watchedFiles = [URL: UInt64]()
 var workingFiles = Set<URL>()
 
 func main() {
@@ -11,7 +11,7 @@ func main() {
 
 	while true {
 		updateDirectory(args.directory, ignoringReadme: readme)
-		sleep(1)
+		sleep(60)
 	}
 }
 
@@ -27,7 +27,7 @@ func updateDirectory(_ directory: URL, ignoringReadme readme: URL) {
 		let isDir = isDirectory(item: item)
 
 		// get size
-		let currentSize: Int
+		let currentSize: UInt64
 		if isDir {
 			currentSize = getSize(ofDirectory: item)
 			guard currentSize != 0 else {
@@ -134,47 +134,38 @@ func isDirectory(item: URL) -> Bool {
 	return isDir.boolValue
 }
 
-func getSize(ofFile file: URL) -> Int {
-	var st = stat()
-	let statResult = stat(file.path, &st)
-	guard statResult != -1 else { return 0 }
-	return Int(st.st_size)
+func getSize(ofFile file: URL) -> UInt64 {
+	let result = SystemUtility.shellArrayOut(["du", "-b", file.path])
+	guard result.returnCode == 0,
+		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting file size: \(result.stdOut)") }
+	let sizeStr = sizeStrExtra.replacingOccurrences(of: ##"\D.*"##, with: "", options: .regularExpression, range: nil)
+	guard let fileSize = UInt64(sizeStr) else { fatalError("Error converting string size to int") }
+	return fileSize
 }
 
-func getSize(ofDirectory directory: URL) -> Int {
-//	guard scrapeDirectory(at: directory).count != 0 else { return 0 }
-//	let result = SystemUtility.shellArrayOut(["du", "-b", directory.path])
-//	guard result.returnCode == 0,
-//		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting directory size") }
-//	let sizeStr = sizeStrExtra.replacingOccurrences(of: ##"\D.*"##, with: "", options: .regularExpression, range: nil)
-//	guard let dirSize = Int(sizeStr) else { fatalError("Error converting string size to int") }
-//	return dirSize
-
-	let errorHandler = { (url: URL, error: Error) -> Bool in
-		print("error scraping url \(url): \(error)")
-		return true
-	}
-	guard let enumerator = fm.enumerator(at: directory, includingPropertiesForKeys: nil, options: [], errorHandler: errorHandler) else { return 0 }
-	var outSize = 0
-	for plainItem in enumerator.allObjects {
-		guard let item = plainItem as? URL else {
-			print("not url: \(plainItem)")
-			continue
-		}
-		guard !isDirectory(item: item) else {
-			print("skipping directory: \(item)")
-			continue
-		}
-		outSize += getSize(ofFile: item)
-	}
-	return outSize
+func getSize(ofDirectory directory: URL) -> UInt64 {
+//	print("checking size of \(directory.path)")
+	guard scrapeDirectory(at: directory).count != 0 else { return 0 }
+	#if os(macOS)
+	let result = SystemUtility.shellArrayOut(["du", directory.path])
+	let result2 = SystemUtility.shell(["du", directory.path])
+	#elseif os(Linux)
+	let result = SystemUtility.shellArrayOut(["du", "-b", directory.path])
+	let result2 = SystemUtility.shell(["du", "-b", directory.path])
+	#endif
+	guard result.returnCode == 0,
+		let sizeStrExtra = result.stdOut.last else { fatalError("Error getting directory size: \(result.stdOut) (\(result) AND \(result2)") }
+	let sizeStr = sizeStrExtra.replacingOccurrences(of: ##"\D.*"##, with: "", options: .regularExpression, range: nil)
+	guard let dirSize = UInt64(sizeStr) else { fatalError("Error converting string size to int") }
+	return dirSize
 }
 
 func rcloneFile(_ file: URL) {
 //	let command = "rclone -u moveto GCloudAutoBackup:backups-mredig-nearline/autobackup/"
-	let command = "rclone -u --bwlimit 0.25M moveto GCloudAutoBackup:backups-mredig-nearline/autobackup/"
+	let sourcePathSymbol = "sourcePathSymbol---1-1-1-1-111--1"
+	let command = "rclone -u --bwlimit 0.25M moveto \(sourcePathSymbol) GCloudAutoBackup:backups-mredig-nearline/autobackup/"
 	var commandArgs = command.split(separator: " ").map { String($0) }
-	commandArgs.insert(file.path, at: commandArgs.count - 1)
+	commandArgs = commandArgs.map { $0 == sourcePathSymbol ? file.path : $0 }
 	commandArgs[commandArgs.count - 1] += file.lastPathComponent
 //	print(commandArgs)
 
