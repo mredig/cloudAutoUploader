@@ -1,3 +1,3 @@
-# gcloud_watcher
+# cloudAutoUploader
 
 A description of this package.
