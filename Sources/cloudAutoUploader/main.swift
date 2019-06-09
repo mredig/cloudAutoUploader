@@ -183,7 +183,7 @@ func getSize(ofDirectory directory: URL) -> UInt64 {
 	return dirSize
 }
 
-func rcloneFile(_ file: URL, excludes: URL) {
+func rcloneFile(_ file: URL, excludes: URL, async: Bool = false) {
 //	let command = "rclone -u moveto GCloudAutoBackup:backups-mredig-nearline/autobackup/"
 	let sourcePathSymbol = "sourcePathSymbol---1-1-1-1-111--1"
 	let command = "rclone -u --bwlimit 0.25M moveto --exclude-from \(excludes.path) \(sourcePathSymbol) GCloudAutoBackup:backups-mredig-nearline/autobackup/"
@@ -192,16 +192,22 @@ func rcloneFile(_ file: URL, excludes: URL) {
 	commandArgs[commandArgs.count - 1] += file.lastPathComponent
 //	print(commandArgs)
 
-//	DispatchQueue.global().async {
+	if async {
+		DispatchQueue.global().async {
+			let info = SystemUtility.shell(commandArgs)
+			print(info)
+		}
+	} else {
 		let info = SystemUtility.shell(commandArgs)
 		print(info)
-//	}
+	}
+
 }
 
 
 @discardableResult func outputInstructions(_ printOut: Bool = true) -> String {
 	let instructions = """
-Usage: cloud_watcher [pathToWatchDirectory]
+Usage: cloudAutoUploader [pathToWatchDirectory]
 """
 	if printOut {
 		print(instructions)
