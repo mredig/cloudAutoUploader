@@ -187,7 +187,8 @@ func rcloneFile(_ file: URL, excludes: URL, async: Bool = false) {
 //	let command = "rclone -u moveto GCloudAutoBackup:backups-mredig-nearline/autobackup/"
 	let sourcePathSymbol = "sourcePathSymbol---1-1-1-1-111--1"
 	let excludeFlag = "--exclude-from \(excludes.path)"
-	let command = "rclone -u --bwlimit 0.25M moveto \(excludeFlag) \(sourcePathSymbol) GCloudAutoBackup:backups-mredig-nearline/autobackup/"
+	let urlIsDirectory = isDirectory(item: file)
+	let command = "rclone -u --bwlimit 0.25M moveto \(urlIsDirectory ? excludeFlag : "") \(sourcePathSymbol) GCloudAutoBackup:backups-mredig-nearline/autobackup/"
 	var commandArgs = command.split(separator: " ").map { String($0) }
 	commandArgs = commandArgs.map { $0 == sourcePathSymbol ? file.path : $0 }
 	commandArgs[commandArgs.count - 1] += file.lastPathComponent
